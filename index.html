@@ -11,92 +11,80 @@
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2964/2964514.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.6/babel.min.js"></script>
+    
+    <script src="https://unpkg.com/recharts@2.10.3/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
         
         body {
             font-family: 'Noto Sans TC', sans-serif;
-            background-color: #F7F5F0; /* 奶茶色背景 */
+            background-color: #F7F5F0;
             -webkit-tap-highlight-color: transparent;
             overscroll-behavior-y: none;
         }
-
-        /* 自定義顏色變數 */
-        :root {
-            --color-bg: #F7F5F0;
-            --color-card: #FFFFFF;
-            --color-text-primary: #5C5C5C;
-            --color-text-secondary: #8C8C8C;
-            --color-accent: #8E8070; /* 暖棕色 */
-            --color-dot-strength: #6B7280; /* 深灰 (重訓) */
-            --color-dot-cardio: #739072; /* 莫蘭迪綠 (有氧) */
-            --color-dot-swim: #8CABBE; /* 莫蘭迪藍 (游泳) */
-        }
-
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
+        /* 載入動畫 */
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
-        const { Calendar, Activity, Waves, Dumbbell, Save, ChevronLeft, ChevronRight, X, Plus, TrendingUp, Share } = lucide;
-        const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
+    <div id="error-message" style="display:none; color:red; padding:20px; font-weight:bold;"></div>
 
-        // --- 設定區 ---
-        const GOOGLE_FORM_ACTION_URL = ""; // 如果你要自動上傳，之後這裡填入表單網址
-        
-        // 運動強度係數 (METs)
-        const METS = {
-            '重訓': 5.0, // 中高強度重訓
-            '有氧': 7.0, // 慢跑/高強度有氧
-            '游泳': 8.0, // 自由式中等速度
-            '瑜珈': 3.0,
-            '其他': 4.0
+    <script type="text/babel">
+        // --- 錯誤處理 ---
+        window.onerror = function(message, source, lineno, colno, error) {
+            document.getElementById('error-message').style.display = 'block';
+            document.getElementById('error-message').innerText = '發生錯誤: ' + message;
         };
+
+        // --- 從全域變數獲取庫 ---
+        const { useState, useEffect, useMemo } = React;
+        const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = window.Recharts;
+        const { Calendar, Activity, Waves, Dumbbell, Save, ChevronLeft, ChevronRight, X, Plus, TrendingUp } = lucide;
+
+        // --- 設定與常數 ---
+        const METS = { '重訓': 5.0, '有氧': 7.0, '游泳': 8.0, '瑜珈': 3.0, '其他': 4.0 };
 
         const App = () => {
             const [selectedDate, setSelectedDate] = useState(new Date());
-            const [records, setRecords] = useState({}); // 儲存所有的紀錄
+            const [records, setRecords] = useState({});
             const [showModal, setShowModal] = useState(false);
-            const [view, setView] = useState('calendar'); // calendar, stats
+            const [view, setView] = useState('calendar');
             
-            // 表單輸入狀態
+            // 表單狀態
             const [inputType, setInputType] = useState('重訓');
             const [inputContent, setInputContent] = useState('');
-            const [inputTime, setInputTime] = useState(''); // 分鐘
+            const [inputTime, setInputTime] = useState('');
             const [inputWeight, setInputWeight] = useState('');
 
-            // 初始化：從 LocalStorage 讀取資料
+            // 初始化讀取資料
             useEffect(() => {
-                const savedData = localStorage.getItem('fitness_data_v1');
-                if (savedData) {
-                    setRecords(JSON.parse(savedData));
+                try {
+                    const savedData = localStorage.getItem('fitness_data_v1');
+                    if (savedData) setRecords(JSON.parse(savedData));
+                    const lastWeight = localStorage.getItem('last_weight');
+                    if (lastWeight) setInputWeight(lastWeight);
+                } catch (e) {
+                    console.error("讀取資料失敗", e);
                 }
-                // 嘗試讀取最後一次體重
-                const lastWeight = localStorage.getItem('last_weight');
-                if (lastWeight) setInputWeight(lastWeight);
             }, []);
 
-            // 儲存資料
+            // 存檔
             const handleSave = () => {
-                const dateKey = selectedDate.toISOString().split('T')[0];
+                if(!inputContent) return alert("請輸入內容！");
                 
-                // 計算卡路里
+                const dateKey = selectedDate.toISOString().split('T')[0];
                 let calories = 0;
                 if (inputWeight && inputTime) {
                     const met = METS[inputType] || 4.0;
-                    const hours = parseFloat(inputTime) / 60;
-                    calories = Math.round(met * parseFloat(inputWeight) * hours);
+                    calories = Math.round(met * parseFloat(inputWeight) * (parseFloat(inputTime) / 60));
                 }
 
                 const newRecord = {
@@ -108,299 +96,174 @@
                     calories: calories
                 };
 
-                const updatedRecords = {
-                    ...records,
-                    [dateKey]: [...(records[dateKey] || []), newRecord]
-                };
-
+                const updatedRecords = { ...records, [dateKey]: [...(records[dateKey] || []), newRecord] };
                 setRecords(updatedRecords);
                 localStorage.setItem('fitness_data_v1', JSON.stringify(updatedRecords));
                 if (inputWeight) localStorage.setItem('last_weight', inputWeight);
-
-                // 如果有設定 Google Form，這裡會自動發送 (目前先留空)
                 
                 setShowModal(false);
-                // 清空輸入
                 setInputContent('');
                 setInputTime('');
             };
 
             const handleDelete = (dateKey, id) => {
-                const updatedDayRecords = records[dateKey].filter(r => r.id !== id);
-                const updatedRecords = { ...records, [dateKey]: updatedDayRecords };
+                const updatedRecords = { ...records, [dateKey]: records[dateKey].filter(r => r.id !== id) };
                 setRecords(updatedRecords);
                 localStorage.setItem('fitness_data_v1', JSON.stringify(updatedRecords));
             };
 
-            // 加入行事曆功能
             const addToCalendar = (record) => {
                 const title = `🏋️ ${record.type}: ${record.content}`;
-                const startDate = selectedDate.toISOString().split('T')[0].replace(/-/g, '');
-                const endDate = startDate;
-                const details = `時間: ${record.time}分鐘\n消耗: ${record.calories} kcal\n體重: ${record.weight}kg`;
-                const url = `data:text/calendar;charset=utf8,BEGIN:VCALENDAR%0AVERSION:2.0%0ABEGIN:VEVENT%0ADTSTART:${startDate}%0ADTEND:${endDate}%0ASUMMARY:${title}%0ADESCRIPTION:${details}%0AEND:VEVENT%0AEND:VCALENDAR`;
-                
+                const dateStr = selectedDate.toISOString().split('T')[0].replace(/-/g, '');
+                const details = `時間: ${record.time}分鐘\n消耗: ${record.calories} kcal`;
+                const url = `data:text/calendar;charset=utf8,BEGIN:VCALENDAR%0AVERSION:2.0%0ABEGIN:VEVENT%0ADTSTART:${dateStr}%0ADTEND:${dateStr}%0ASUMMARY:${title}%0ADESCRIPTION:${details}%0AEND:VEVENT%0AEND:VCALENDAR`;
                 window.open(url);
             };
 
-            // 產生月曆格子
-            const renderCalendarDays = () => {
+            // 日曆渲染
+            const renderCalendar = () => {
                 const year = selectedDate.getFullYear();
                 const month = selectedDate.getMonth();
                 const firstDay = new Date(year, month, 1).getDay();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
-                
                 const days = [];
-                for (let i = 0; i < firstDay; i++) {
-                    days.push(<div key={`empty-${i}`} className="h-24"></div>);
-                }
+
+                for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="h-24"></div>);
 
                 for (let d = 1; d <= daysInMonth; d++) {
                     const currentString = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                     const dayRecords = records[currentString] || [];
-                    const isToday = new Date().toDateString() === new Date(year, month, d).toDateString();
                     const isSelected = selectedDate.getDate() === d && selectedDate.getMonth() === month;
-
+                    
                     days.push(
-                        <div 
-                            key={d} 
-                            onClick={() => setSelectedDate(new Date(year, month, d))}
-                            className={`h-24 border-t border-l border-[#E5E5E5] p-1 relative flex flex-col items-center transition-all
-                                ${isSelected ? 'bg-[#E8E0D5] bg-opacity-30' : 'bg-white'}
-                                ${isToday ? 'font-bold text-[#8E8070]' : 'text-[#5C5C5C]'}
-                            `}
-                        >
-                            <span className="text-sm mb-1">{d}</span>
+                        <div key={d} onClick={() => setSelectedDate(new Date(year, month, d))}
+                             className={`h-24 border-t border-l border-gray-200 p-1 relative flex flex-col items-center transition-all ${isSelected ? 'bg-[#E8E0D5]/50' : 'bg-white'}`}>
+                            <span className={`text-sm mb-1 ${isSelected ? 'font-bold text-[#8E8070]' : 'text-gray-500'}`}>{d}</span>
                             <div className="flex flex-wrap justify-center gap-1 w-full">
-                                {dayRecords.map((r, idx) => {
-                                    let color = '#6B7280';
-                                    if(r.type === '有氧') color = '#739072';
-                                    if(r.type === '游泳') color = '#8CABBE';
-                                    return (
-                                        <div key={idx} className="w-2 h-2 rounded-full" style={{backgroundColor: color}}></div>
-                                    )
-                                })}
+                                {dayRecords.map((r, i) => (
+                                    <div key={i} className="w-2 h-2 rounded-full" 
+                                         style={{backgroundColor: r.type==='有氧'?'#739072':r.type==='游泳'?'#8CABBE':'#6B7280'}}></div>
+                                ))}
                             </div>
-                            {dayRecords.length > 0 && (
-                                <span className="absolute bottom-1 right-1 text-[10px] text-gray-400">
-                                    {dayRecords.reduce((acc, cur) => acc + (cur.calories || 0), 0)}
-                                </span>
-                            )}
+                            {dayRecords.length > 0 && <span className="absolute bottom-1 right-1 text-[10px] text-gray-400">{dayRecords.reduce((a,c)=>a+(c.calories||0),0)}</span>}
                         </div>
                     );
                 }
                 return days;
             };
 
-            // 統計圖表數據準備
-            const chartData = useMemo(() => {
-                const data = [];
-                const sortedKeys = Object.keys(records).sort();
-                sortedKeys.forEach(key => {
-                    const dayRecs = records[key];
-                    // 找當天最後一筆體重
-                    const weightRec = dayRecs.find(r => r.weight);
-                    if (weightRec) {
-                        data.push({ date: key.slice(5), weight: parseFloat(weightRec.weight) });
-                    }
-                });
-                return data.slice(-10); // 只取最近 10 筆
-            }, [records]);
-
-            // 當前選中日期的紀錄
             const currentKey = selectedDate.toISOString().split('T')[0];
             const currentRecords = records[currentKey] || [];
+            
+            // 圖表資料
+            const chartData = useMemo(() => {
+                return Object.keys(records).sort().map(k => {
+                   const w = records[k].find(r => r.weight);
+                   return w ? { date: k.slice(5), weight: parseFloat(w.weight) } : null;
+                }).filter(Boolean).slice(-10);
+            }, [records]);
 
             return (
-                <div className="max-w-md mx-auto min-h-screen bg-[#F7F5F0] pb-20 relative shadow-2xl overflow-hidden">
-                    
-                    {/* 頂部標題 */}
-                    <div className="pt-12 pb-4 px-6 flex justify-between items-center bg-white shadow-sm sticky top-0 z-10">
-                        <h1 className="text-2xl font-bold text-[#5C5C5C] tracking-wide">
-                            {selectedDate.getFullYear()} 年 {selectedDate.getMonth() + 1} 月
-                        </h1>
-                        <div className="flex gap-2">
-                            <button onClick={() => setView(view === 'calendar' ? 'stats' : 'calendar')} className="p-2 rounded-full bg-[#F7F5F0] text-[#8E8070]">
-                                {view === 'calendar' ? <TrendingUp size={20}/> : <Calendar size={20}/>}
-                            </button>
-                        </div>
+                <div className="max-w-md mx-auto min-h-screen bg-[#F7F5F0] pb-20 fade-in">
+                    {/* 頂部導航 */}
+                    <div className="pt-12 pb-4 px-6 flex justify-between items-center bg-white sticky top-0 z-10 shadow-sm">
+                        <h1 className="text-xl font-bold text-[#5C5C5C]">{selectedDate.getFullYear()} 年 {selectedDate.getMonth() + 1} 月</h1>
+                        <button onClick={() => setView(view === 'calendar' ? 'stats' : 'calendar')} className="p-2 rounded-full bg-gray-100">
+                            {view === 'calendar' ? <TrendingUp size={20} color="#8E8070"/> : <Calendar size={20} color="#8E8070"/>}
+                        </button>
                     </div>
 
-                    {/* 主要內容區 */}
                     <div className="p-4">
                         {view === 'calendar' ? (
                             <>
-                                {/* 星期標頭 */}
-                                <div className="grid grid-cols-7 text-center mb-2 text-[#8C8C8C] text-xs">
-                                    {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
+                                <div className="grid grid-cols-7 text-center mb-2 text-xs text-gray-400">
+                                    {['日','一','二','三','四','五','六'].map(d=><div key={d}>{d}</div>)}
                                 </div>
-                                {/* 日曆本體 */}
-                                <div className="grid grid-cols-7 bg-white rounded-xl overflow-hidden shadow-sm border-r border-b border-[#E5E5E5]">
-                                    {renderCalendarDays()}
+                                <div className="grid grid-cols-7 bg-white rounded-xl shadow-sm overflow-hidden border-r border-b border-gray-200">
+                                    {renderCalendar()}
                                 </div>
 
-                                {/* 當日詳細資訊卡片 */}
+                                {/* 詳細資料區 */}
                                 <div className="mt-6">
-                                    <div className="flex justify-between items-end mb-2 px-2">
-                                        <h3 className="text-[#8E8070] font-medium text-lg">
-                                            {selectedDate.getMonth() + 1}/{selectedDate.getDate()} 訓練紀錄
-                                        </h3>
-                                        <button 
-                                            onClick={() => setShowModal(true)}
-                                            className="bg-[#8E8070] text-white px-4 py-2 rounded-full text-sm shadow-md flex items-center gap-1 active:scale-95 transition-transform"
-                                        >
+                                    <div className="flex justify-between items-center mb-3 px-1">
+                                        <h3 className="text-[#8E8070] font-medium">{selectedDate.getMonth()+1}/{selectedDate.getDate()} 紀錄</h3>
+                                        <button onClick={() => setShowModal(true)} className="bg-[#8E8070] text-white px-3 py-1.5 rounded-full text-sm flex items-center gap-1 shadow">
                                             <Plus size={16}/> 新增
                                         </button>
                                     </div>
-                                    
                                     <div className="space-y-3">
-                                        {currentRecords.length === 0 ? (
-                                            <div className="text-center text-gray-400 py-8 bg-white rounded-xl border border-dashed border-gray-300">
-                                                今天還沒有紀錄，動起來！💪
-                                            </div>
-                                        ) : (
-                                            currentRecords.map((r) => (
-                                                <div key={r.id} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-[#8E8070] relative group">
-                                                    <div className="flex justify-between items-start">
-                                                        <div>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={`px-2 py-0.5 rounded text-xs text-white
-                                                                    ${r.type === '重訓' ? 'bg-[#6B7280]' : r.type === '有氧' ? 'bg-[#739072]' : 'bg-[#8CABBE]'}
-                                                                `}>{r.type}</span>
-                                                                <span className="font-medium text-[#5C5C5C]">{r.content}</span>
-                                                            </div>
-                                                            <div className="text-xs text-gray-400 mt-1 flex gap-3">
-                                                                <span>⏱ {r.time} min</span>
-                                                                <span>🔥 {r.calories} kcal</span>
-                                                                {r.weight && <span>⚖️ {r.weight} kg</span>}
-                                                            </div>
+                                        {currentRecords.map(r => (
+                                            <div key={r.id} className="bg-white p-3 rounded-xl shadow-sm border-l-4 border-[#8E8070] relative">
+                                                <div className="flex justify-between">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <span className="text-xs px-2 py-0.5 rounded text-white bg-gray-500"
+                                                                  style={{backgroundColor: r.type==='有氧'?'#739072':r.type==='游泳'?'#8CABBE':'#6B7280'}}>
+                                                                {r.type}
+                                                            </span>
+                                                            <span className="text-gray-700 font-medium">{r.content}</span>
                                                         </div>
-                                                        <button 
-                                                            onClick={() => handleDelete(currentKey, r.id)}
-                                                            className="text-gray-300 hover:text-red-400 p-1"
-                                                        >
-                                                            <X size={16}/>
-                                                        </button>
+                                                        <div className="text-xs text-gray-400 space-x-2">
+                                                            <span>⏱ {r.time}min</span>
+                                                            <span>🔥 {r.calories}kcal</span>
+                                                            {r.weight && <span>⚖️ {r.weight}kg</span>}
+                                                        </div>
                                                     </div>
-                                                    {/* 加入行事曆按鈕 (小小的) */}
-                                                    <button 
-                                                        onClick={() => addToCalendar(r)}
-                                                        className="absolute bottom-2 right-2 text-[#8CABBE] hover:text-[#5C5C5C] text-xs flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full"
-                                                    >
-                                                        📅 同步
-                                                    </button>
+                                                    <button onClick={() => handleDelete(currentKey, r.id)} className="text-gray-300 p-1"><X size={16}/></button>
                                                 </div>
-                                            ))
-                                        )}
+                                                <button onClick={() => addToCalendar(r)} className="absolute bottom-2 right-2 bg-gray-50 text-[#8CABBE] text-[10px] px-2 py-1 rounded-full border border-gray-100">
+                                                    📅 同步
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {currentRecords.length === 0 && <div className="text-center text-gray-300 py-6 border border-dashed rounded-xl">尚無紀錄</div>}
                                     </div>
                                 </div>
                             </>
                         ) : (
-                            /* 圖表模式 */
                             <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <h3 className="text-[#5C5C5C] font-bold mb-6">體重趨勢圖 (最近10筆)</h3>
-                                {chartData.length > 1 ? (
-                                    <div className="h-64 w-full">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart data={chartData}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E5"/>
-                                                <XAxis dataKey="date" tick={{fontSize: 12, fill: '#8C8C8C'}} axisLine={false} tickLine={false}/>
-                                                <YAxis domain={['auto', 'auto']} tick={{fontSize: 12, fill: '#8C8C8C'}} axisLine={false} tickLine={false} width={30}/>
-                                                <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}/>
-                                                <Line type="monotone" dataKey="weight" stroke="#8E8070" strokeWidth={3} dot={{fill: '#8E8070', strokeWidth: 2}} activeDot={{r: 6}} />
-                                            </LineChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                ) : (
-                                    <div className="text-center text-gray-400 py-10">
-                                        需要更多數據才能顯示圖表 📊
-                                    </div>
-                                )}
+                                <h3 className="text-gray-600 font-bold mb-4">體重趨勢</h3>
+                                <div className="h-64">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={chartData}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                                            <XAxis dataKey="date" tick={{fontSize:12}} axisLine={false} tickLine={false}/>
+                                            <YAxis domain={['auto','auto']} width={30} tick={{fontSize:12}} axisLine={false} tickLine={false}/>
+                                            <Tooltip/>
+                                            <Line type="monotone" dataKey="weight" stroke="#8E8070" strokeWidth={3} dot={{fill:'#8E8070'}}/>
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
                             </div>
                         )}
                     </div>
 
-                    {/* 新增紀錄 Modal (彈跳視窗) */}
+                    {/* Modal */}
                     {showModal && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowModal(false)}>
-                            <div className="bg-white w-full max-w-sm rounded-2xl p-6 space-y-4 animate-slide-up" onClick={e => e.stopPropagation()}>
-                                <div className="flex justify-between items-center mb-2">
-                                    <h3 className="text-lg font-bold text-[#5C5C5C]">新增紀錄</h3>
-                                    <button onClick={() => setShowModal(false)}><X size={24} className="text-gray-400"/></button>
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowModal(false)}>
+                            <div className="bg-white w-full max-w-sm rounded-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                                <h3 className="text-lg font-bold text-gray-700">新增紀錄</h3>
+                                <div className="flex gap-2">
+                                    {['重訓','有氧','游泳','瑜珈'].map(t => (
+                                        <button key={t} onClick={() => setInputType(t)} 
+                                            className={`flex-1 py-2 rounded text-sm ${inputType===t?'bg-[#8E8070] text-white':'bg-gray-100 text-gray-600'}`}>{t}</button>
+                                    ))}
                                 </div>
-                                
-                                <div>
-                                    <label className="text-xs text-gray-500 block mb-1">運動類型</label>
-                                    <div className="flex gap-2">
-                                        {['重訓', '有氧', '游泳', '瑜珈'].map(t => (
-                                            <button 
-                                                key={t}
-                                                onClick={() => setInputType(t)}
-                                                className={`flex-1 py-2 rounded-lg text-sm transition-colors
-                                                    ${inputType === t ? 'bg-[#8E8070] text-white shadow-md' : 'bg-gray-100 text-gray-600'}
-                                                `}
-                                            >
-                                                {t}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="text-xs text-gray-500 block mb-1">詳細內容 (例如: 深蹲 50kg)</label>
-                                    <input 
-                                        type="text" 
-                                        value={inputContent}
-                                        onChange={e => setInputContent(e.target.value)}
-                                        className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-[#5C5C5C] focus:outline-none focus:ring-2 focus:ring-[#8E8070]"
-                                        placeholder="輸入課表..."
-                                    />
-                                </div>
-
+                                <input type="text" value={inputContent} onChange={e=>setInputContent(e.target.value)} className="w-full bg-gray-50 border p-3 rounded-lg" placeholder="內容 (如: 深蹲 50kg)"/>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs text-gray-500 block mb-1">時間 (分鐘)</label>
-                                        <input 
-                                            type="number" 
-                                            value={inputTime}
-                                            onChange={e => setInputTime(e.target.value)}
-                                            className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-[#5C5C5C]"
-                                            placeholder="60"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-500 block mb-1">今日體重 (kg)</label>
-                                        <input 
-                                            type="number" 
-                                            value={inputWeight}
-                                            onChange={e => setInputWeight(e.target.value)}
-                                            className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-[#5C5C5C]"
-                                            placeholder="60.5"
-                                        />
-                                    </div>
+                                    <input type="number" value={inputTime} onChange={e=>setInputTime(e.target.value)} className="bg-gray-50 border p-3 rounded-lg" placeholder="時間(分)"/>
+                                    <input type="number" value={inputWeight} onChange={e=>setInputWeight(e.target.value)} className="bg-gray-50 border p-3 rounded-lg" placeholder="體重(kg)"/>
                                 </div>
-
-                                <button 
-                                    onClick={handleSave}
-                                    className="w-full bg-[#8E8070] text-white py-3 rounded-xl font-bold shadow-lg mt-4 active:scale-95 transition-transform"
-                                >
-                                    儲存紀錄
-                                </button>
+                                <button onClick={handleSave} className="w-full bg-[#8E8070] text-white py-3 rounded-xl font-bold shadow-lg">儲存</button>
                             </div>
                         </div>
                     )}
-
                 </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-
-    <script>
-        // 註冊 Lucide icons
-        lucide.createIcons();
     </script>
 </body>
 </html>
