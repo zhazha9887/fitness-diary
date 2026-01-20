@@ -1,0 +1,731 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  ChevronLeft, ChevronRight, Dumbbell, Activity, Waves, 
+  Plus, Trash2, Menu, X, TrendingUp, Calendar as CalendarIcon, 
+  BrainCircuit, Save, Settings, Flame, Timer, Hash, Navigation,
+  Sparkles, Loader, RefreshCw, Utensils, Bike, Footprints
+} from 'lucide-react';
+
+// --- API 設定 ---
+const apiKey = ""; 
+const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
+
+// --- 工具函數 ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+const formatDateKey = (date) => date.toISOString().split('T')[0];
+
+// --- 莫蘭迪色系配置 ---
+const COLORS = {
+  bg: 'bg-[#F7F5F0]', // 奶茶色背景
+  card: 'bg-white',
+  text: {
+    primary: 'text-[#5C5C5C]',
+    secondary: 'text-[#8C8C8C]',
+    accent: 'text-[#8E8070]', // 暖棕色文字
+  },
+  dots: {
+    strength: 'bg-[#6B7280]', // 深灰
+    cardio: 'bg-[#739072]',   // 莫蘭迪綠
+    swim: 'bg-[#8CABBE]',     // 莫蘭迪藍
+    diet: 'bg-[#D98E73]',     // 莫蘭迪暖橘 (飲食)
+  },
+  chart: {
+    weight: '#D4A5A5', // 髒粉紅
+    fat: '#9E9D89',    // 橄欖灰
+    muscle: '#8CABBE'  // 灰藍
+  }
+};
+
+// --- 預設數據結構 ---
+const DEFAULT_STRENGTH_CATEGORIES = {
+  '上肢訓練': [
+    '啞鈴臥推', '槓鈴臥推', '器械推胸 (Chest Press)', 
+    '蝴蝶機夾胸 (Pec Deck)', '滑輪飛鳥 (Cable Fly)',
+    '站姿肩推', '器械肩推 (Shoulder Press)', '側平舉機',
+    '滑輪下拉 (Lat Pulldown)', '坐姿划船 (Seated Row)', 
+    '輔助引體向上 (Assisted Pull-up)', '面拉 (Face Pull)',
+    '二頭彎舉', '滑輪三頭下壓'
+  ],
+  '下肢訓練': [
+    '深蹲 (Squat)', '硬舉 (Deadlift)', '史密斯深蹲',
+    '腿推舉 (Leg Press)', '哈克深蹲 (Hack Squat)',
+    '腿伸屈機 (Leg Extension)', '坐姿腿後勾 (Seated Leg Curl)',
+    '分腿蹲 (Bulgarian Split Squat)',
+    '髖外展機 (Abduction)', '髖內收機 (Adduction)',
+    '臀推機 (Hip Thrust)', '坐姿提踵 (Calf Raise)'
+  ],
+  '核心訓練': [
+    '棒式 (Plank)', '捲腹 (Crunch)', '滑輪捲腹 (Cable Crunch)',
+    '俄羅斯轉體', '懸垂抬腿', '健腹輪'
+  ],
+};
+
+const COMMON_CARDIO_TYPES = [
+    '跑步機', '戶外跑步', '室內腳踏車', '橢圓機', '划船機', '跳繩', '其他'
+];
+
+// --- Calorie Calculation Helper ---
+const calculateCalories = (type, params, userWeight) => {
+    const weight = parseFloat(userWeight) || 70; // Default 70kg if missing
+    let mets = 0;
+    
+    // Duration estimation
+    let durationHrs = 0;
+
+    if (type === 'strength') {
+        // 重訓邏輯：看組數 (1組=3分鐘)
+        const sets = parseFloat(params.sets || 0);
+        if (sets <= 0) return 0;
+        
+        const estMinutes = sets * 3; 
+        durationHrs = estMinutes / 60;
+        mets = 5.0; // Moderate-Vigorous weight lifting
+    } else if (type === 'swim_breakdown') {
+        // 游泳邏輯：看總時間 + 泳姿加權
+        durationHrs = parseFloat(params.duration || 0) / 60;
+        if (durationHrs <= 0) return 0;
+
+        const free = parseFloat(params.lapsFree || 0);
+        const breast = parseFloat(params.lapsBreast || 0);
+        const back = parseFloat(params.lapsBack || 0);
+        const fly = parseFloat(params.lapsFly || 0);
+        const totalLaps = free + breast + back + fly;
+
+        if (totalLaps > 0) {
+            // METs: Free(9.8), Breast(10.3), Back(9.5), Fly(13.8)
+            // Calculate weighted average MET based on laps proportion
+            const totalScore = (free * 9.8) + (breast * 10.3) + (back * 9.5) + (fly * 13.8);
+            mets = totalScore / totalLaps;
+        } else {
+            mets = 8.0; // General leisure swimming if no laps entered
+        }
+    } else {
+        // 一般有氧邏輯
+        durationHrs = parseFloat(params.duration || 0) / 60;
+        if (durationHrs <= 0) return 0;
+
+        if (type === 'treadmill') {
+            const speedKph = parseFloat(params.speed || 0);
+            const incline = parseFloat(params.incline || 0); 
+            if (speedKph > 0) {
+                // ACSM Running Equation
+                const speedMmin = speedKph * 16.6667;
+                const gradeDecimal = incline / 100;
+                const vo2 = (0.2 * speedMmin) + (0.9 * speedMmin * gradeDecimal) + 3.5;
+                mets = vo2 / 3.5;
+            } else {
+                mets = 3.5; 
+            }
+        } else if (type === 'cardio_general') {
+            mets = 7.0; 
+        }
+    }
+
+    return Math.round(mets * weight * durationHrs);
+};
+
+// --- API Helper ---
+async function callGeminiAPI(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  const payload = { contents: [{ parts: [{ text: prompt }] }] };
+  const delays = [1000, 2000, 4000];
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+      const data = await response.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || "AI 暫時無法回應。";
+    } catch (error) {
+      if (i === delays.length) throw error;
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+    }
+  }
+}
+
+// --- Components ---
+const SimpleLineChart = ({ data, dataKey, color, label, unit }) => {
+  if (!data || data.length < 2) return <div className="h-48 flex items-center justify-center border border-dashed border-[#D1D1D1] rounded-xl text-[#8C8C8C] text-sm bg-[#FAF9F6]">請至少輸入兩筆數據</div>;
+  const sortedData = [...data].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const values = sortedData.map(d => parseFloat(d[dataKey] || 0));
+  const max = Math.max(...values) * 1.05; 
+  const min = Math.min(...values) * 0.95; 
+  const width = 100; const height = 100;
+  const points = sortedData.map((d, i) => {
+    const x = (i / (sortedData.length - 1)) * width;
+    const val = parseFloat(d[dataKey] || 0);
+    const y = height - ((val - min) / (max - min)) * height;
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <div className="mb-6">
+      <div className="flex justify-between items-end mb-2">
+        <span className="text-sm font-bold text-[#5C5C5C]">{label}</span>
+        <span className="text-xs text-[#8C8C8C]">{unit}</span>
+      </div>
+      <div className="relative h-32 w-full">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+          <line x1="0" y1="0" x2="100" y2="0" stroke="#E5E5E5" strokeWidth="0.5" />
+          <line x1="0" y1="50" x2="100" y2="50" stroke="#E5E5E5" strokeWidth="0.5" />
+          <line x1="0" y1="100" x2="100" y2="100" stroke="#E5E5E5" strokeWidth="0.5" />
+          <polyline fill="none" stroke={color} strokeWidth="2" points={points} strokeLinecap="round" strokeLinejoin="round" />
+          {sortedData.map((d, i) => {
+            const x = (i / (sortedData.length - 1)) * width;
+            const val = parseFloat(d[dataKey] || 0);
+            const y = height - ((val - min) / (max - min)) * height;
+            return <circle key={i} cx={x} cy={y} r="2" fill="white" stroke={color} strokeWidth="1" />;
+          })}
+        </svg>
+        <div className="absolute top-0 right-0 bg-white/80 px-2 py-1 rounded text-xs shadow-sm text-[#5C5C5C]">最新: {values[values.length-1]} {unit}</div>
+      </div>
+    </div>
+  );
+};
+
+export default function MorandiFitnessApp() {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [view, setView] = useState('calendar'); 
+  const [panelTab, setPanelTab] = useState('workout'); 
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // Data State
+  const [workouts, setWorkouts] = useState({});
+  const [dietLogs, setDietLogs] = useState({});
+  const [inbodyData, setInbodyData] = useState([]);
+  const [strengthCategories, setStrengthCategories] = useState(DEFAULT_STRENGTH_CATEGORIES);
+  
+  // AI State
+  const [aiSuggestion, setAiSuggestion] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [inbodyAnalysis, setInbodyAnalysis] = useState('');
+  const [isInbodyAiLoading, setIsInbodyAiLoading] = useState(false);
+
+  // Form States
+  const [newItemType, setNewItemType] = useState('strength'); // 'strength' | 'cardio' | 'swim'
+  
+  // Strength Form
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedExercise, setSelectedExercise] = useState('');
+  const [strWeight, setStrWeight] = useState('');
+  const [strSets, setStrSets] = useState('');
+  const [strReps, setStrReps] = useState('');
+  const [strCalories, setStrCalories] = useState(''); 
+  
+  // Cardio Form
+  const [selectedCardioType, setSelectedCardioType] = useState('跑步機'); 
+  const [cardioDuration, setCardioDuration] = useState('');
+  const [cardioCalories, setCardioCalories] = useState('');
+  const [treadmillIncline, setTreadmillIncline] = useState('');
+  const [treadmillSpeed, setTreadmillSpeed] = useState('');
+  
+  // Swim Form (New Breakdown)
+  const [swimDuration, setSwimDuration] = useState('');
+  const [swimLapsFree, setSwimLapsFree] = useState('');
+  const [swimLapsBreast, setSwimLapsBreast] = useState('');
+  const [swimLapsBack, setSwimLapsBack] = useState('');
+  const [swimLapsFly, setSwimLapsFly] = useState('');
+  const [swimCalories, setSwimCalories] = useState('');
+
+  // Diet Form
+  const [dietName, setDietName] = useState('');
+  const [dietCalories, setDietCalories] = useState('');
+  const [dietProtein, setDietProtein] = useState('');
+  
+  // Inbody Form
+  const [inbodyForm, setInbodyForm] = useState({ weight: '', bodyFat: '', muscle: '' });
+
+  // Effects
+  useEffect(() => {
+    const w = localStorage.getItem('morandi_workouts');
+    const d = localStorage.getItem('morandi_diet');
+    const i = localStorage.getItem('morandi_inbody');
+    const c = localStorage.getItem('morandi_categories');
+    if (w) setWorkouts(JSON.parse(w));
+    if (d) setDietLogs(JSON.parse(d));
+    if (i) setInbodyData(JSON.parse(i));
+    if (c) setStrengthCategories(JSON.parse(c));
+  }, []);
+
+  useEffect(() => { if (!selectedCategory) { const k = Object.keys(strengthCategories)[0]; if (k) { setSelectedCategory(k); if (strengthCategories[k]?.length) setSelectedExercise(strengthCategories[k][0]); } } }, [strengthCategories]);
+
+  useEffect(() => localStorage.setItem('morandi_workouts', JSON.stringify(workouts)), [workouts]);
+  useEffect(() => localStorage.setItem('morandi_diet', JSON.stringify(dietLogs)), [dietLogs]);
+  useEffect(() => localStorage.setItem('morandi_inbody', JSON.stringify(inbodyData)), [inbodyData]);
+  useEffect(() => localStorage.setItem('morandi_categories', JSON.stringify(strengthCategories)), [strengthCategories]);
+
+  // --- Auto-Calculate Calories Effect ---
+  useEffect(() => {
+    const userWeight = inbodyData.length > 0 ? inbodyData[inbodyData.length-1].weight : 70;
+    
+    if (newItemType === 'strength') {
+        if (strSets) {
+            const cal = calculateCalories('strength', { sets: strSets }, userWeight);
+            setStrCalories(cal > 0 ? cal.toString() : '');
+        }
+    } else if (newItemType === 'swim') {
+        // Swim Calculation
+        if (swimDuration) {
+            const cal = calculateCalories('swim_breakdown', { 
+                duration: swimDuration,
+                lapsFree: swimLapsFree,
+                lapsBreast: swimLapsBreast,
+                lapsBack: swimLapsBack,
+                lapsFly: swimLapsFly
+            }, userWeight);
+            setSwimCalories(cal > 0 ? cal.toString() : '');
+        }
+    } else {
+        // Cardio
+        let type = 'cardio_general';
+        let params = { duration: cardioDuration };
+        
+        if (selectedCardioType === '跑步機') {
+            type = 'treadmill';
+            params = { ...params, speed: treadmillSpeed, incline: treadmillIncline };
+        } else {
+            type = 'cardio_general';
+        }
+        
+        if (cardioDuration) {
+            const cal = calculateCalories(type, params, userWeight);
+            setCardioCalories(cal > 0 ? cal.toString() : '');
+        }
+    }
+  }, [
+    newItemType, strSets, 
+    cardioDuration, selectedCardioType, treadmillSpeed, treadmillIncline, 
+    swimDuration, swimLapsFree, swimLapsBreast, swimLapsBack, swimLapsFly,
+    inbodyData
+  ]);
+
+  // Handlers
+  const handleResetCategories = () => { if(window.confirm("重置分類？")) setStrengthCategories(DEFAULT_STRENGTH_CATEGORIES); };
+
+  const handleAddWorkout = (e) => {
+    e.preventDefault();
+    const dateKey = formatDateKey(selectedDate);
+    
+    let newWorkout = { 
+        id: generateId(), 
+        completedAt: new Date().toISOString() 
+    };
+
+    if (newItemType === 'strength') {
+      if (!selectedExercise) return;
+      newWorkout = {
+        ...newWorkout,
+        type: 'strength',
+        name: selectedExercise,
+        category: selectedCategory,
+        details: `${strWeight}kg × ${strReps}下 × ${strSets}組`, 
+        weight: strWeight,
+        reps: strReps,
+        sets: strSets,
+        calories: strCalories 
+      };
+    } else if (newItemType === 'swim') {
+        if (!swimDuration) return;
+        newWorkout = {
+            ...newWorkout,
+            type: 'swim',
+            name: '游泳',
+            calories: swimCalories
+        };
+        let detailsArr = [`${swimDuration} min`];
+        let lapsDetail = [];
+        if (swimLapsFree) lapsDetail.push(`自由:${swimLapsFree}`);
+        if (swimLapsBreast) lapsDetail.push(`蛙:${swimLapsBreast}`);
+        if (swimLapsBack) lapsDetail.push(`仰:${swimLapsBack}`);
+        if (swimLapsFly) lapsDetail.push(`蝶:${swimLapsFly}`);
+        
+        if (lapsDetail.length > 0) detailsArr.push(lapsDetail.join(' '));
+        if (swimCalories) detailsArr.push(`${swimCalories} kcal`);
+        newWorkout.details = detailsArr.join(' / ');
+
+    } else {
+      // Cardio logic
+      if (!selectedCardioType) return;
+      newWorkout.type = 'cardio';
+      newWorkout.name = selectedCardioType;
+      
+      let detailsArr = [];
+      if (cardioDuration) detailsArr.push(`${cardioDuration} min`);
+      
+      if (selectedCardioType === '跑步機') {
+          if (treadmillSpeed) detailsArr.push(`速度 ${treadmillSpeed}`);
+          if (treadmillIncline) detailsArr.push(`坡度 ${treadmillIncline}`);
+      }
+      
+      if (cardioCalories) {
+          detailsArr.push(`${cardioCalories} kcal`);
+          newWorkout.calories = cardioCalories;
+      }
+      
+      newWorkout.details = detailsArr.join(' / ');
+    }
+
+    setWorkouts(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), newWorkout] }));
+  };
+
+  const handleAddDiet = (e) => {
+    e.preventDefault();
+    if (!dietName) return;
+    const dateKey = formatDateKey(selectedDate);
+    setDietLogs(prev => ({ ...prev, [dateKey]: [...(prev[dateKey] || []), { id: generateId(), name: dietName, calories: dietCalories || 0, protein: dietProtein || 0 }] }));
+    setDietName(''); setDietCalories(''); setDietProtein('');
+  };
+
+  const handleAddInbody = (e) => {
+    e.preventDefault();
+    if (!inbodyForm.weight) return;
+    const entry = { id: generateId(), date: formatDateKey(new Date()), ...inbodyForm };
+    const idx = inbodyData.findIndex(d => d.date === entry.date);
+    const newData = [...inbodyData];
+    if (idx >= 0) newData[idx] = entry; else newData.push(entry);
+    setInbodyData(newData);
+    setInbodyForm({ weight: '', bodyFat: '', muscle: '' });
+  };
+
+  const deleteWorkout = (id) => setWorkouts(p => ({ ...p, [formatDateKey(selectedDate)]: p[formatDateKey(selectedDate)].filter(w => w.id !== id) }));
+  const deleteDiet = (id) => setDietLogs(p => ({ ...p, [formatDateKey(selectedDate)]: p[formatDateKey(selectedDate)].filter(d => d.id !== id) }));
+
+  const getDailyDietStats = (dateKey) => (dietLogs[dateKey] || []).reduce((acc, curr) => ({ calories: acc.calories + (+curr.calories || 0), protein: acc.protein + (+curr.protein || 0) }), { calories: 0, protein: 0 });
+
+  // AI
+  const handleGenerateWorkoutPlan = async () => {
+    setIsAiLoading(true); setAiSuggestion('');
+    const h = [], d = [];
+    for(let i=0; i<7; i++) {
+        const k = formatDateKey(new Date(new Date().setDate(new Date().getDate()-i)));
+        if(workouts[k]) h.push({date:k, items:workouts[k]});
+        if(dietLogs[k]) d.push({date:k, items:dietLogs[k]});
+    }
+    try {
+        const res = await callGeminiAPI(`作為教練，根據我近7天紀錄：訓練${JSON.stringify(h)}，飲食${JSON.stringify(d)}，給出今日建議(100字內，溫暖語氣)。`);
+        setAiSuggestion(res);
+    } catch(e) { setAiSuggestion("連線失敗"); } finally { setIsAiLoading(false); }
+  };
+
+  const handleAnalyzeInbody = async () => {
+    if(inbodyData.length < 2) return alert("資料不足");
+    setIsInbodyAiLoading(true);
+    try {
+        const res = await callGeminiAPI(`作為營養師，分析InBody：${JSON.stringify(inbodyData.slice(-5))}，給出建議(150字內)。`);
+        setInbodyAnalysis(res);
+    } catch(e) { setInbodyAnalysis("連線失敗"); } finally { setIsInbodyAiLoading(false); }
+  };
+
+  const getStaticTip = useMemo(() => {
+    const k = formatDateKey(new Date());
+    if((workouts[k]||[]).length && (dietLogs[k]||[]).length) return "今日紀錄完美！";
+    if((workouts[k]||[]).length) return "訓練完成，記得補充營養。";
+    return "點擊按鈕獲取今日建議 ✨";
+  }, [workouts, dietLogs]);
+
+  // Calendar Helpers
+  const getDaysInMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const getFirstDayOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1).getDay();
+  const changeMonth = (off) => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + off)));
+
+  return (
+    <div className={`h-[100dvh] w-full ${COLORS.bg} font-sans flex flex-col xl:flex-row overflow-hidden`}>
+      
+      {/* Sidebar */}
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-[#EBE7DF] shadow-xl transform transition-transform duration-300
+        xl:relative xl:translate-x-0 xl:shadow-none
+        ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="p-6 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-[#5C5C5C]">Morandi Fit</h2>
+          <button onClick={() => setIsMenuOpen(false)} className="text-[#8C8C8C] xl:hidden"><X /></button>
+        </div>
+        <nav className="px-4 space-y-2">
+          <button onClick={() => { setView('calendar'); setIsMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${view === 'calendar' ? 'bg-white shadow-sm text-[#5C5C5C]' : 'text-[#8C8C8C] hover:bg-white/50'}`}><CalendarIcon size={20} /> 健身月曆</button>
+          <button onClick={() => { setView('inbody'); setIsMenuOpen(false); }} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors ${view === 'inbody' ? 'bg-white shadow-sm text-[#5C5C5C]' : 'text-[#8C8C8C] hover:bg-white/50'}`}><TrendingUp size={20} /> InBody 追蹤</button>
+        </nav>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col h-full min-w-0 bg-[#F7F5F0]">
+        
+        <header className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between bg-[#F7F5F0]/80 backdrop-blur-md z-10 sticky top-0">
+          <button onClick={() => setIsMenuOpen(true)} className="p-2 text-[#5C5C5C] hover:bg-[#EBE7DF] rounded-lg xl:hidden"><Menu size={24} /></button>
+          <h1 className="text-lg md:text-xl font-bold tracking-wide text-[#5C5C5C] truncate">
+            {view === 'calendar' ? `${currentDate.getFullYear()} . ${(currentDate.getMonth() + 1).toString().padStart(2, '0')}` : 'InBody Analysis'}
+          </h1>
+          <div className="w-10"></div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-safe safe-area-bottom">
+          
+          {view === 'calendar' ? (
+            <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-6 h-full min-h-0">
+              
+              <div className="flex-1 flex flex-col min-w-0 gap-4">
+                <div className="bg-gradient-to-r from-[#EBE7DF] to-white p-4 rounded-2xl shadow-sm border border-white relative overflow-hidden shrink-0">
+                  <div className="flex items-start gap-3 relative z-10">
+                    <div className="p-2 bg-white rounded-full text-[#8E8070] shadow-sm">{isAiLoading ? <Loader className="animate-spin" size={20} /> : <Sparkles size={20} />}</div>
+                    <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center mb-1">
+                            <h3 className="text-xs font-bold text-[#8E8070] uppercase tracking-wider">AI 智能教練</h3>
+                            {!isAiLoading && <button onClick={handleGenerateWorkoutPlan} className="text-[10px] bg-[#8E8070] text-white px-2 py-1 rounded-full hover:bg-[#7D6F60] transition-colors flex items-center gap-1"><Sparkles size={10} /> 建議</button>}
+                        </div>
+                        <p className="text-sm text-[#5C5C5C] leading-relaxed truncate md:whitespace-normal">{isAiLoading ? "思考中..." : (aiSuggestion || getStaticTip)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl p-4 md:p-6 shadow-sm border border-[#E5E5E5] flex flex-col">
+                  <div className="flex justify-between items-center mb-4">
+                    <button onClick={() => changeMonth(-1)} className="p-1 hover:bg-[#F7F5F0] rounded-full text-[#8C8C8C]"><ChevronLeft /></button>
+                    <span className="text-sm font-medium text-[#8C8C8C]">MONTHLY OVERVIEW</span>
+                    <button onClick={() => changeMonth(1)} className="p-1 hover:bg-[#F7F5F0] rounded-full text-[#8C8C8C]"><ChevronRight /></button>
+                  </div>
+
+                  <div className="grid grid-cols-7 mb-2">
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={`${d}-${i}`} className="text-center text-xs font-bold text-[#D1D1D1]">{d}</div>)}
+                  </div>
+                  
+                  <div className="grid grid-cols-7 gap-1 md:gap-2 auto-rows-fr">
+                    {Array.from({ length: getFirstDayOfMonth(currentDate) }).map((_, i) => <div key={`empty-${i}`} />)}
+                    {Array.from({ length: getDaysInMonth(currentDate) }).map((_, i) => {
+                      const day = i + 1;
+                      const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+                      const offset = date.getTimezoneOffset();
+                      const correctedDate = new Date(date.getTime() - (offset*60*1000));
+                      const dateKey = formatDateKey(correctedDate);
+                      const dayData = workouts[dateKey] || [];
+                      const dayDiet = dietLogs[dateKey] || [];
+                      const isSelected = formatDateKey(selectedDate) === dateKey;
+                      const isToday = formatDateKey(new Date()) === dateKey;
+
+                      return (
+                        <div 
+                          key={day}
+                          onClick={() => setSelectedDate(correctedDate)}
+                          className={`
+                            relative rounded-xl flex flex-col items-center p-1 cursor-pointer transition-all
+                            min-h-[60px] md:min-h-[80px] lg:min-h-[90px]
+                            ${isSelected ? 'bg-[#EBE7DF] ring-2 ring-[#8E8070] ring-opacity-20' : 'hover:bg-[#F7F5F0]'}
+                            ${isToday && !isSelected ? 'bg-[#F7F5F0] font-bold' : ''}
+                          `}
+                        >
+                          <span className={`text-sm mb-1 ${isSelected || isToday ? 'text-[#5C5C5C]' : 'text-[#8C8C8C]'}`}>{day}</span>
+                          <div className="flex gap-1 flex-wrap justify-center w-full px-1">
+                            {dayData.slice(0, 4).map((w, idx) => <div key={`w-${idx}`} className={`w-1.5 h-1.5 rounded-full ${COLORS.dots[w.type]}`} />)}
+                            {dayDiet.length > 0 && <div className={`w-1.5 h-1.5 rounded-full ${COLORS.dots.diet}`} />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full lg:w-80 xl:w-96 flex flex-col gap-4 shrink-0">
+                <div className="bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-[#E5E5E5] flex flex-col h-full lg:max-h-[calc(100dvh-100px)] min-h-[500px]">
+                  
+                  <div className="mb-2 pb-2 border-b border-[#F0F0F0]">
+                    <h3 className="text-2xl font-bold text-[#5C5C5C] font-serif">
+                      {selectedDate.getDate()} <span className="text-base text-[#8C8C8C] font-sans font-normal">/ {selectedDate.getMonth()+1}月</span>
+                    </h3>
+                  </div>
+
+                  <div className="flex p-1 bg-[#F7F5F0] rounded-xl mb-4 shrink-0">
+                     <button onClick={() => setPanelTab('workout')} className={`flex-1 py-1.5 text-xs rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${panelTab === 'workout' ? 'bg-white text-[#5C5C5C] shadow-sm' : 'text-[#8C8C8C]'}`}><Dumbbell size={14} /> 運動</button>
+                     <button onClick={() => setPanelTab('diet')} className={`flex-1 py-1.5 text-xs rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${panelTab === 'diet' ? 'bg-white text-[#5C5C5C] shadow-sm' : 'text-[#8C8C8C]'}`}><Utensils size={14} /> 飲食</button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-3">
+                    {panelTab === 'workout' ? (
+                       (workouts[formatDateKey(selectedDate)] || []).length === 0 ? 
+                       <div className="h-32 flex items-center justify-center text-[#D1D1D1] text-sm">無運動紀錄</div> :
+                       (workouts[formatDateKey(selectedDate)] || []).map(w => (
+                          <div key={w.id} className="relative group bg-[#F9F9F9] p-3 rounded-xl flex justify-between items-start">
+                             <div className="flex gap-3">
+                                <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${COLORS.dots[w.type]}`} />
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <div className="text-sm font-bold text-[#5C5C5C]">{w.name}</div>
+                                        {w.calories && <span className="text-[10px] text-[#D98E73] bg-[#FAF7F2] px-1.5 py-0.5 rounded-full">{w.calories} kcal</span>}
+                                    </div>
+                                    <p className="text-xs text-[#8C8C8C]">{w.details}</p>
+                                </div>
+                             </div>
+                             <button onClick={() => deleteWorkout(w.id)} className="text-[#D1D1D1] hover:text-[#D4A5A5] p-1"><Trash2 size={14} /></button>
+                          </div>
+                       ))
+                    ) : (
+                       (dietLogs[formatDateKey(selectedDate)] || []).length === 0 ?
+                       <div className="h-32 flex items-center justify-center text-[#D1D1D1] text-sm">無飲食紀錄</div> :
+                       (dietLogs[formatDateKey(selectedDate)] || []).map(d => (
+                          <div key={d.id} className="relative group bg-[#F9F9F9] p-3 rounded-xl flex justify-between items-center">
+                             <div className="flex gap-3 items-center">
+                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${COLORS.dots.diet}`} />
+                                <div><div className="text-sm font-bold text-[#5C5C5C]">{d.name}</div><div className="text-xs text-[#8C8C8C]">{d.calories}kcal · {d.protein}g</div></div>
+                             </div>
+                             <button onClick={() => deleteDiet(d.id)} className="text-[#D1D1D1] hover:text-[#D4A5A5] p-1"><Trash2 size={14} /></button>
+                          </div>
+                       ))
+                    )}
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-[#F0F0F0] shrink-0">
+                    {panelTab === 'workout' ? (
+                        <form onSubmit={handleAddWorkout} className="space-y-3">
+                           
+                           {/* 1.1 運動類型分頁 (新增游泳) */}
+                           <div className="flex items-center gap-2 mb-2">
+                               <div className="flex bg-[#F5F5F5] p-1 rounded-full w-full">
+                                    <button type="button" onClick={()=>setNewItemType('strength')} className={`flex-1 py-1 text-xs rounded-full transition-all ${newItemType==='strength' ? 'bg-[#6B7280] text-white shadow-sm' : 'text-[#8C8C8C]'}`}>重訓</button>
+                                    <button type="button" onClick={()=>setNewItemType('cardio')} className={`flex-1 py-1 text-xs rounded-full transition-all ${newItemType==='cardio' ? 'bg-[#739072] text-white shadow-sm' : 'text-[#8C8C8C]'}`}>有氧</button>
+                                    <button type="button" onClick={()=>setNewItemType('swim')} className={`flex-1 py-1 text-xs rounded-full transition-all ${newItemType==='swim' ? 'bg-[#8CABBE] text-white shadow-sm' : 'text-[#8C8C8C]'}`}>游泳</button>
+                               </div>
+                           </div>
+
+                           {newItemType === 'strength' && (
+                             <>
+                               {/* 1.2 訓練種類 (左右並排) */}
+                               <div className="flex gap-2 mb-2">
+                                   <div className="flex-1">
+                                       <select value={selectedCategory} onChange={e=>{
+                                            if(e.target.value==='new'){ const n=prompt("新分類"); if(n){setStrengthCategories(p=>({...p,[n]:[]}));setSelectedCategory(n);} }
+                                            else setSelectedCategory(e.target.value);
+                                       }} className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs text-[#5C5C5C] focus:ring-1 focus:ring-[#8E8070] outline-none">
+                                            <option value="" disabled>選擇部位</option>{Object.keys(strengthCategories).map(k=><option key={k} value={k}>{k}</option>)}<option value="new">+ 新增分類</option>
+                                       </select>
+                                   </div>
+                                   {selectedCategory && (
+                                       <div className="flex-1">
+                                           <select value={selectedExercise} onChange={e=>{
+                                               if(e.target.value==='new'){ const n=prompt("新動作"); if(n){setStrengthCategories(p=>({...p,[selectedCategory]:[...p[selectedCategory],n]}));setSelectedExercise(n);} }
+                                               else setSelectedExercise(e.target.value);
+                                           }} className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs text-[#5C5C5C] focus:ring-1 focus:ring-[#8E8070] outline-none">
+                                              <option value="" disabled>選擇動作</option>{strengthCategories[selectedCategory].map(k=><option key={k} value={k}>{k}</option>)}<option value="new">+ 新增動作</option>
+                                           </select>
+                                       </div>
+                                   )}
+                               </div>
+
+                               {/* 1.2 數據輸入 (順序：重量 -> 次數 -> 組數) */}
+                               <div className="flex gap-2">
+                                    <div className="flex-1 relative">
+                                        <input type="number" placeholder="重量" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-[#8E8070]" value={strWeight} onChange={e=>setStrWeight(e.target.value)} />
+                                        <span className="absolute right-2 top-2.5 text-[10px] text-[#8C8C8C]">kg</span>
+                                    </div>
+                                    <div className="flex-1 relative">
+                                        <input type="number" placeholder="次數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-[#8E8070]" value={strReps} onChange={e=>setStrReps(e.target.value)} />
+                                        <span className="absolute right-2 top-2.5 text-[10px] text-[#8C8C8C]">reps</span>
+                                    </div>
+                                    <div className="flex-1 relative">
+                                        <input type="number" placeholder="組數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-[#8E8070]" value={strSets} onChange={e=>setStrSets(e.target.value)} />
+                                        <span className="absolute right-2 top-2.5 text-[10px] text-[#8C8C8C]">sets</span>
+                                    </div>
+                               </div>
+                               
+                               {/* Auto Calorie Row */}
+                               <div className="flex justify-between items-center mt-2">
+                                    <div className="flex-1 relative">
+                                        <input type="number" placeholder="預估消耗" className="w-full bg-[#FAF7F2] text-[#D98E73] font-bold rounded-lg px-2 py-2 text-xs outline-none border border-[#F0EBE0]" value={strCalories} onChange={e=>setStrCalories(e.target.value)} />
+                                        <span className="absolute right-2 top-2.5 text-[10px] text-[#D98E73]">kcal</span>
+                                    </div>
+                                    <div className="flex-1 flex justify-end">
+                                        <button type="button" onClick={handleResetCategories} className="text-[10px] text-[#8C8C8C] flex items-center gap-1 hover:text-[#5C5C5C]"><RefreshCw size={10} /> 重置清單</button>
+                                    </div>
+                               </div>
+                             </>
+                           )}
+
+                           {newItemType === 'cardio' && (
+                               <>
+                                 <select value={selectedCardioType} onChange={e=>setSelectedCardioType(e.target.value)} className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs text-[#5C5C5C] mb-2 focus:ring-1 focus:ring-[#739072] outline-none">
+                                     {COMMON_CARDIO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                 </select>
+
+                                 {selectedCardioType === '跑步機' && (
+                                     <div className="flex gap-2 mb-2">
+                                         <div className="flex-1 relative"><input type="number" placeholder="坡度" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={treadmillIncline} onChange={e=>setTreadmillIncline(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">deg</span></div>
+                                         <div className="flex-1 relative"><input type="number" placeholder="速度" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={treadmillSpeed} onChange={e=>setTreadmillSpeed(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">kph</span></div>
+                                     </div>
+                                 )}
+
+                                 <div className="flex gap-2">
+                                     <div className="flex-1 relative"><input type="number" placeholder="時間" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={cardioDuration} onChange={e=>setCardioDuration(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">min</span></div>
+                                     <div className="flex-1 relative"><input type="number" placeholder="卡路里" className="w-full bg-[#FAF7F2] text-[#D98E73] font-bold rounded-lg px-2 py-1.5 text-xs outline-none border border-[#F0EBE0]" value={cardioCalories} onChange={e=>setCardioCalories(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#D98E73]">kcal</span></div>
+                                 </div>
+                               </>
+                           )}
+
+                           {newItemType === 'swim' && (
+                               <>
+                                 <div className="flex gap-2 mb-2">
+                                     <div className="flex-1 relative"><input type="number" placeholder="總時間" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-[#8CABBE]" value={swimDuration} onChange={e=>setSwimDuration(e.target.value)} /><span className="absolute right-2 top-2.5 text-[10px] text-[#8C8C8C]">min</span></div>
+                                     <div className="flex-1 relative"><input type="number" placeholder="預估消耗" className="w-full bg-[#FAF7F2] text-[#D98E73] font-bold rounded-lg px-2 py-2 text-xs outline-none border border-[#F0EBE0]" value={swimCalories} onChange={e=>setSwimCalories(e.target.value)} /><span className="absolute right-2 top-2.5 text-[10px] text-[#D98E73]">kcal</span></div>
+                                 </div>
+                                 
+                                 <div className="grid grid-cols-2 gap-2">
+                                     <div className="relative"><input type="number" placeholder="自由式趟數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={swimLapsFree} onChange={e=>setSwimLapsFree(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">趟</span></div>
+                                     <div className="relative"><input type="number" placeholder="蛙式趟數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={swimLapsBreast} onChange={e=>setSwimLapsBreast(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">趟</span></div>
+                                     <div className="relative"><input type="number" placeholder="仰式趟數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={swimLapsBack} onChange={e=>setSwimLapsBack(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">趟</span></div>
+                                     <div className="relative"><input type="number" placeholder="蝶式趟數" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={swimLapsFly} onChange={e=>setSwimLapsFly(e.target.value)} /><span className="absolute right-2 top-2 text-[10px] text-[#8C8C8C]">趟</span></div>
+                                 </div>
+                               </>
+                           )}
+
+                           <button type="submit" className="w-full bg-[#8E8070] text-white rounded-xl py-2 text-xs hover:bg-[#7D6F60] transition-colors"><Plus size={14} className="inline"/> 加入紀錄</button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleAddDiet} className="space-y-2">
+                           <div className="flex gap-2">
+                              <div className="bg-[#FAF7F2] p-2 rounded-lg flex-1 text-center"><div className="text-[10px] text-[#8C8C8C]">熱量</div><div className="text-sm font-bold text-[#D98E73]">{getDailyDietStats(formatDateKey(selectedDate)).calories}</div></div>
+                              <div className="bg-[#FAF7F2] p-2 rounded-lg flex-1 text-center"><div className="text-[10px] text-[#8C8C8C]">蛋白</div><div className="text-sm font-bold text-[#8E8070]">{getDailyDietStats(formatDateKey(selectedDate)).protein}</div></div>
+                           </div>
+                           <input placeholder="食物名稱" className="w-full bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={dietName} onChange={e=>setDietName(e.target.value)} />
+                           <div className="flex gap-2">
+                              <input type="number" placeholder="kcal" className="w-1/2 bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={dietCalories} onChange={e=>setDietCalories(e.target.value)} />
+                              <input type="number" placeholder="蛋白(g)" className="w-1/2 bg-[#F9F9F9] rounded-lg px-2 py-1.5 text-xs outline-none" value={dietProtein} onChange={e=>setDietProtein(e.target.value)} />
+                           </div>
+                           <button type="submit" className="w-full bg-[#D98E73] text-white rounded-xl py-2 text-xs hover:bg-[#C07A60] transition-colors"><Plus size={14} className="inline"/> 加入</button>
+                        </form>
+                    )}
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          ) : (
+            // InBody View
+            <div className="max-w-3xl mx-auto space-y-6">
+              {/* Form */}
+              <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#E5E5E5]">
+                 <h2 className="text-lg font-bold text-[#5C5C5C] mb-4 flex items-center gap-2"><Plus size={20} className="text-[#8E8070]" /> 新增紀錄</h2>
+                 <form onSubmit={handleAddInbody} className="flex flex-col md:flex-row gap-4 items-end">
+                    <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">體重 (kg)</label><input type="number" step="0.1" required value={inbodyForm.weight} onChange={e => setInbodyForm({...inbodyForm, weight: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
+                    <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">體脂率 (%)</label><input type="number" step="0.1" value={inbodyForm.bodyFat} onChange={e => setInbodyForm({...inbodyForm, bodyFat: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
+                    <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">肌肉量 (kg)</label><input type="number" step="0.1" value={inbodyForm.muscle} onChange={e => setInbodyForm({...inbodyForm, muscle: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
+                    <button type="submit" className="w-full md:w-auto bg-[#8E8070] text-white px-6 py-2 rounded-xl text-sm hover:bg-[#7D6F60] transition-colors flex items-center justify-center gap-2"><Save size={16} /> 儲存</button>
+                 </form>
+              </div>
+              {/* AI */}
+              <div className="bg-gradient-to-r from-[#F7F5F0] to-white rounded-3xl p-6 shadow-sm border border-[#E5E5E5]">
+                 <div className="flex justify-between items-center mb-2"><h3 className="text-lg font-bold text-[#5C5C5C] flex items-center gap-2"><Sparkles size={18} className="text-[#8E8070]" /> AI 體態分析</h3><button onClick={handleAnalyzeInbody} disabled={isInbodyAiLoading} className="text-xs bg-[#8E8070] text-white px-3 py-1.5 rounded-full hover:bg-[#7D6F60] transition-colors flex items-center gap-1 disabled:opacity-50">{isInbodyAiLoading ? <Loader className="animate-spin" size={14} /> : <BrainCircuit size={14} />} 分析</button></div>
+                 <div className="bg-white/80 rounded-xl p-4 text-sm text-[#5C5C5C] min-h-[60px]">{isInbodyAiLoading ? "分析中..." : (inbodyAnalysis || "請累積至少兩筆數據")}</div>
+              </div>
+              {/* Charts */}
+              <div className="bg-white rounded-3xl p-8 shadow-sm border border-[#E5E5E5]">
+                <SimpleLineChart data={inbodyData} dataKey="weight" color={COLORS.chart.weight} label="體重" unit="kg" />
+                <div className="h-8"></div>
+                <SimpleLineChart data={inbodyData} dataKey="bodyFat" color={COLORS.chart.fat} label="體脂" unit="%" />
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
