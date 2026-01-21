@@ -7,19 +7,20 @@
     
     <!-- iOS Web App 設定 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Morandi Fit">
     
-    <!-- APP Icon -->
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23F7F5F0'/%3E%3Crect x='30' y='30' width='120' height='120' rx='20' fill='%238E8070'/%3E%3Ctext x='90' y='115' font-family='sans-serif' font-size='80' text-anchor='middle' fill='white' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
+    <!-- APP Icon (米白底色 + 咖啡色啞鈴) -->
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23F7F5F0'/%3E%3Cpath d='M50 65 L130 65' stroke='%238E8070' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M50 115 L130 115' stroke='%238E8070' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M90 65 L90 115' stroke='%238E8070' stroke-width='30' stroke-linecap='round'/%3E%3Ccircle cx='40' cy='90' r='25' fill='%238E8070'/%3E%3Ccircle cx='140' cy='90' r='25' fill='%238E8070'/%3E%3C/svg%3E">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%23F7F5F0'/%3E%3Cpath d='M50 65 L130 65' stroke='%238E8070' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M50 115 L130 115' stroke='%238E8070' stroke-width='12' stroke-linecap='round'/%3E%3Cpath d='M90 65 L90 115' stroke='%238E8070' stroke-width='30' stroke-linecap='round'/%3E%3Ccircle cx='40' cy='90' r='25' fill='%238E8070'/%3E%3Ccircle cx='140' cy='90' r='25' fill='%238E8070'/%3E%3C/svg%3E">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Babel Standalone (用於編譯 JSX) -->
+    <!-- Babel Standalone -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Import Map: 定義模組來源 (全面使用 esm.sh) -->
+    <!-- Import Map -->
     <script type="importmap">
     {
       "imports": {
@@ -42,7 +43,6 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        // 使用標準 ESM Import
         import React, { useState, useEffect, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
         import { 
@@ -53,8 +53,6 @@
         } from 'lucide-react';
 
         // --- 設定與工具 ---
-        
-        // 【重要】請在此填入你的 Google Gemini API Key
         const apiKey = ""; 
         const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
 
@@ -85,31 +83,12 @@
 
         // --- 預設數據 ---
         const DEFAULT_STRENGTH_CATEGORIES = {
-            '上肢訓練': [
-                '啞鈴臥推', '槓鈴臥推', '器械推胸 (Chest Press)', 
-                '蝴蝶機夾胸 (Pec Deck)', '滑輪飛鳥 (Cable Fly)',
-                '站姿肩推', '器械肩推 (Shoulder Press)', '側平舉機',
-                '滑輪下拉 (Lat Pulldown)', '坐姿划船 (Seated Row)', 
-                '輔助引體向上 (Assisted Pull-up)', '面拉 (Face Pull)',
-                '二頭彎舉', '滑輪三頭下壓'
-            ],
-            '下肢訓練': [
-                '深蹲 (Squat)', '硬舉 (Deadlift)', '史密斯深蹲',
-                '腿推舉 (Leg Press)', '哈克深蹲 (Hack Squat)',
-                '腿伸屈機 (Leg Extension)', '坐姿腿後勾 (Seated Leg Curl)',
-                '分腿蹲 (Bulgarian Split Squat)',
-                '髖外展機 (Abduction)', '髖內收機 (Adduction)',
-                '臀推機 (Hip Thrust)', '坐姿提踵 (Calf Raise)'
-            ],
-            '核心訓練': [
-                '棒式 (Plank)', '捲腹 (Crunch)', '滑輪捲腹 (Cable Crunch)',
-                '俄羅斯轉體', '懸垂抬腿', '健腹輪'
-            ],
+            '上肢訓練': ['啞鈴臥推', '槓鈴臥推', '器械推胸 (Chest Press)', '蝴蝶機夾胸 (Pec Deck)', '滑輪飛鳥 (Cable Fly)', '站姿肩推', '器械肩推 (Shoulder Press)', '側平舉機', '滑輪下拉 (Lat Pulldown)', '坐姿划船 (Seated Row)', '輔助引體向上 (Assisted Pull-up)', '面拉 (Face Pull)', '二頭彎舉', '滑輪三頭下壓'],
+            '下肢訓練': ['深蹲 (Squat)', '硬舉 (Deadlift)', '史密斯深蹲', '腿推舉 (Leg Press)', '哈克深蹲 (Hack Squat)', '腿伸屈機 (Leg Extension)', '坐姿腿後勾 (Seated Leg Curl)', '分腿蹲 (Bulgarian Split Squat)', '髖外展機 (Abduction)', '髖內收機 (Adduction)', '臀推機 (Hip Thrust)', '坐姿提踵 (Calf Raise)'],
+            '核心訓練': ['棒式 (Plank)', '捲腹 (Crunch)', '滑輪捲腹 (Cable Crunch)', '俄羅斯轉體', '懸垂抬腿', '健腹輪'],
         };
 
-        const COMMON_CARDIO_TYPES = [
-            '跑步機', '戶外跑步', '室內腳踏車', '橢圓機', '划船機', '跳繩', '其他'
-        ];
+        const COMMON_CARDIO_TYPES = ['跑步機', '戶外跑步', '室內腳踏車', '橢圓機', '划船機', '跳繩', '其他'];
 
         // --- 計算卡路里 ---
         const calculateCalories = (type, params, userWeight) => {
@@ -210,7 +189,12 @@
                                 const x = (i / (sortedData.length - 1)) * width;
                                 const val = parseFloat(d[dataKey] || 0);
                                 const y = height - ((val - min) / (max - min)) * height;
-                                return <circle key={i} cx={x} cy={y} r="2" fill="white" stroke={color} strokeWidth="1" />;
+                                return (
+                                    <g key={i}>
+                                        <circle cx={x} cy={y} r="3" fill="white" stroke={color} strokeWidth="1.5" />
+                                        <title>{d.date}: {val}</title>
+                                    </g>
+                                );
                             })}
                         </svg>
                         <div className="absolute top-0 right-0 bg-white/80 px-2 py-1 rounded text-xs shadow-sm text-[#5C5C5C]">最新: {values[values.length-1]} {unit}</div>
@@ -265,7 +249,9 @@
             const [dietName, setDietName] = useState('');
             const [dietCalories, setDietCalories] = useState('');
             const [dietProtein, setDietProtein] = useState('');
-            const [inbodyForm, setInbodyForm] = useState({ weight: '', bodyFat: '', muscle: '' });
+            
+            // Inbody Form with Date
+            const [inbodyForm, setInbodyForm] = useState({ date: formatDateKey(new Date()), weight: '', bodyFat: '', muscle: '' });
 
             // Load Data
             useEffect(() => {
@@ -371,13 +357,20 @@
 
             const handleAddInbody = (e) => {
                 e.preventDefault();
-                if (!inbodyForm.weight) return;
-                const entry = { id: generateId(), date: formatDateKey(new Date()), ...inbodyForm };
+                if (!inbodyForm.weight || !inbodyForm.date) return;
+                const entry = { id: generateId(), ...inbodyForm };
                 const idx = inbodyData.findIndex(d => d.date === entry.date);
                 const newData = [...inbodyData];
                 if (idx >= 0) newData[idx] = entry; else newData.push(entry);
                 setInbodyData(newData);
-                setInbodyForm({ weight: '', bodyFat: '', muscle: '' });
+                // Keep date as today for next input but clear values
+                setInbodyForm(prev => ({ ...prev, weight: '', bodyFat: '', muscle: '' })); 
+            };
+            
+            const handleDeleteInbody = (date) => {
+                if(window.confirm(`確定刪除 ${date} 的紀錄嗎?`)) {
+                    setInbodyData(prev => prev.filter(d => d.date !== date));
+                }
             };
 
             const deleteWorkout = (id) => setWorkouts(p => ({ ...p, [formatDateKey(selectedDate)]: p[formatDateKey(selectedDate)].filter(w => w.id !== id) }));
@@ -628,11 +621,30 @@
                                     <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#E5E5E5]">
                                         <h2 className="text-lg font-bold text-[#5C5C5C] mb-4 flex items-center gap-2"><Plus size={20} className="text-[#8E8070]" /> 新增紀錄</h2>
                                         <form onSubmit={handleAddInbody} className="flex flex-col md:flex-row gap-4 items-end">
+                                            <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">日期</label><input type="date" required value={inbodyForm.date} onChange={e => setInbodyForm({...inbodyForm, date: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
                                             <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">體重 (kg)</label><input type="number" step="0.1" required value={inbodyForm.weight} onChange={e => setInbodyForm({...inbodyForm, weight: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
                                             <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">體脂率 (%)</label><input type="number" step="0.1" value={inbodyForm.bodyFat} onChange={e => setInbodyForm({...inbodyForm, bodyFat: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
                                             <div className="flex-1 w-full"><label className="text-xs text-[#8C8C8C] mb-1 block">肌肉量 (kg)</label><input type="number" step="0.1" value={inbodyForm.muscle} onChange={e => setInbodyForm({...inbodyForm, muscle: e.target.value})} className="w-full bg-[#F9F9F9] rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#8E8070]" /></div>
                                             <button type="submit" className="w-full md:w-auto bg-[#8E8070] text-white px-6 py-2 rounded-xl text-sm hover:bg-[#7D6F60] transition-colors flex items-center justify-center gap-2"><Save size={16} /> 儲存</button>
                                         </form>
+                                    </div>
+                                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#E5E5E5]">
+                                        <h3 className="text-lg font-bold text-[#5C5C5C] mb-4">歷史紀錄</h3>
+                                        <div className="space-y-3">
+                                            {[...inbodyData].sort((a,b) => new Date(b.date)-new Date(a.date)).map(d => (
+                                                <div key={d.id} className="flex justify-between items-center bg-[#F9F9F9] p-3 rounded-xl">
+                                                    <div>
+                                                        <span className="text-sm font-bold text-[#5C5C5C]">{d.date}</span>
+                                                        <span className="mx-2 text-[#D1D1D1]">|</span>
+                                                        <span className="text-sm text-[#8C8C8C]">{d.weight}kg</span>
+                                                        {d.bodyFat && <span className="text-xs text-[#8C8C8C] ml-2">體脂 {d.bodyFat}%</span>}
+                                                        {d.muscle && <span className="text-xs text-[#8C8C8C] ml-2">肌肉 {d.muscle}kg</span>}
+                                                    </div>
+                                                    <button onClick={() => handleDeleteInbody(d.date)} className="text-[#D1D1D1] hover:text-[#D4A5A5]"><Trash2 size={16} /></button>
+                                                </div>
+                                            ))}
+                                            {inbodyData.length === 0 && <div className="text-center text-[#D1D1D1] text-sm">尚無紀錄</div>}
+                                        </div>
                                     </div>
                                     <div className="bg-gradient-to-r from-[#F7F5F0] to-white rounded-3xl p-6 shadow-sm border border-[#E5E5E5]">
                                         <div className="flex justify-between items-center mb-2"><h3 className="text-lg font-bold text-[#5C5C5C] flex items-center gap-2"><Sparkles size={18} className="text-[#8E8070]" /> AI 體態分析</h3><button onClick={handleAnalyzeInbody} disabled={isInbodyAiLoading} className="text-xs bg-[#8E8070] text-white px-3 py-1.5 rounded-full hover:bg-[#7D6F60] transition-colors flex items-center gap-1 disabled:opacity-50">{isInbodyAiLoading ? <Loader className="animate-spin" size={14} /> : <BrainCircuit size={14} />} 分析</button></div>
